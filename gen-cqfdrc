@@ -1,0 +1,291 @@
+#!/bin/bash
+
+# gen-cqfdrc - Interactive generator for .cqfdrc
+
+# Define the schema
+FIELDS=(
+    "project:org"
+    "project:name"
+    "project:build_context"
+    "project:custom_img_name"
+    "build:command"
+    "build:distro"
+    "build:user_extra_groups"
+    "build:docker_build_args"
+    "build:docker_run_args"
+    "build:docker_rmi_args"
+    "build:files"
+    "build:archive"
+    "build:tar_transform"
+    "build:tar_options"
+)
+
+# Store values
+declare -A VALUES
+
+# Current field index
+IDX=0
+
+# Function to clear screen and print current state
+print_state() {
+    # Move cursor to top left, but don't clear scrollback
+    # We assume the script starts on a clean line.
+    # However, to make it look like the example, we need to redraw from the start position.
+    # Since we can't easily know the start position without clearing, 
+    # and the user requested NOT to clear the terminal above it,
+    # we will use tput to save/restore cursor or move up N lines.
+    
+    # Calculate how many lines we printed last time to move up
+    # Initial state (IDX=0) prints 1 line (header) + 1 line (section) + 1 line (prompt) = 3 lines
+    # But it grows.
+    
+    # Simpler approach: Clear from cursor down, then reprint.
+    # But we need to be at the top of OUR output.
+    
+    # Let's try to just clear the screen if it's the first run, 
+    # OR assume we are always appending? No, the example shows the list growing.
+    # Actually, the example shows:
+    # $ gen-cqfdrc
+    # [project]
+    # org=
+    #
+    # Then:
+    # $ gen-cqfdrc
+    # [project]
+    # org='cool-organization'
+    # name=
+    
+    # This implies the screen IS clearing or we are redrawing everything.
+    # If the user says "don't clear the terminal above it", they mean don't use `clear` which wipes the whole buffer.
+    # They probably want to overwrite the previous output of THIS script.
+    
+    if [ "$FIRST_RUN" != "true" ]; then
+        # Move up N lines
+        # We need to track how many lines we printed.
+        # Header: 0 lines (removed per request)
+        # For each field up to IDX:
+        #   New section? +2 lines (empty line + section header), except first section just +1
+        #   Field line: +1
+        
+        local lines_to_move=0
+        local last_sect=""
+        for ((i=0; i<=PREV_IDX; i++)); do
+            local f=${FIELDS[$i]}
+            local s=${f%%:*}
+            
+            # Section header logic
+            if [ "$s" != "$last_sect" ]; then
+                if [ -n "$last_sect" ]; then ((lines_to_move++)); fi # Empty line
+                ((lines_to_move++)) # Section header
+                last_sect=$s
+            fi
+            
+            # Field line logic
+            # We count the line if it was printed.
+            # It is printed if it has a value OR if it was the one being edited (PREV_IDX)
+            if [ $i -eq $PREV_IDX ] || [ -n "${VALUES[$f]}" ]; then
+                ((lines_to_move++))
+            fi
+        done
+        
+        # Move cursor up
+        if [ $lines_to_move -gt 1 ]; then
+            tput cuu $((lines_to_move - 1))
+        fi
+        tput cr
+        
+        # Clear from cursor to end of screen
+        tput ed
+    fi
+    
+    FIRST_RUN="false"
+    PREV_IDX=$IDX
+    
+    local last_section=""
+    
+    # Loop through all fields up to current
+    for ((i=0; i<=IDX; i++)); do
+        local field=${FIELDS[$i]}
+        local section=${field%%:*}
+        local key=${field##*:}
+        
+        # Print section header if changed
+        if [ "$section" != "$last_section" ]; then
+            if [ -n "$last_section" ]; then echo ""; fi
+            echo "[$section]"
+            last_section=$section
+        fi
+        
+        # If it's the current field being edited
+        if [ $i -eq $IDX ]; then
+            printf "%s=" "$key"
+        else
+            # Print previously entered value if it exists
+            local val=${VALUES[$field]}
+            if [ -n "$val" ]; then
+                echo "$key=$val"
+            fi
+        fi
+    done
+}
+
+# Initialize state tracking
+FIRST_RUN="true"
+PREV_IDX=0
+
+# Main loop
+while [ $IDX -lt ${#FIELDS[@]} ]; do
+    # Handle going back from 0
+    if [ $IDX -lt 0 ]; then IDX=0; fi
+    
+    print_state
+    
+    CURRENT_FIELD=${FIELDS[$IDX]}
+    
+    # Get existing value to edit
+    BUFFER="${VALUES[$CURRENT_FIELD]}"
+    
+    printf "%s" "$BUFFER"
+    
+    while true; do
+        IFS= read -rsn1 char
+        
+        # Handle Enter (empty char)
+        if [[ -z "$char" ]]; then
+            # Save
+            if [ -n "$BUFFER" ]; then
+                VALUES[$CURRENT_FIELD]="$BUFFER"
+            else
+                unset VALUES[$CURRENT_FIELD]
+            fi
+            ((IDX++))
+            break
+        fi
+        
+        # Handle Control Characters
+        # We use hex representation to be safe
+        printf -v hex "%x" "'$char"
+        
+        if [[ "$hex" == "7f" ]] || [[ "$hex" == "8" ]]; then
+            # Backspace
+            if [ ${#BUFFER} -gt 0 ]; then
+                BUFFER="${BUFFER%?}"
+                printf "\b \b"
+            fi
+        elif [[ "$hex" == "e" ]]; then
+            # Ctrl-N (Next)
+            if [ -n "$BUFFER" ]; then
+                VALUES[$CURRENT_FIELD]="$BUFFER"
+            else
+                unset VALUES[$CURRENT_FIELD]
+            fi
+            ((IDX++))
+            break
+        elif [[ "$hex" == "10" ]]; then
+            # Ctrl-P (Prev)
+            if [ -n "$BUFFER" ]; then
+                VALUES[$CURRENT_FIELD]="$BUFFER"
+            else
+                unset VALUES[$CURRENT_FIELD]
+            fi
+            ((IDX--))
+            break
+        elif [[ "$hex" == "3" ]]; then
+            # Ctrl-C
+            echo ""
+            exit 1
+        elif [[ "$hex" =~ ^[2-7]. ]]; then
+            # Printable characters (roughly)
+            # This regex is a bit loose, let's just trust it's printable if not control
+            BUFFER+="$char"
+            printf "%s" "$char"
+        else
+            # Other printable chars (digits, etc)
+            # Hex for 'a' is 61.
+            # Let's just accept everything that isn't a control char we handled
+            # Check if it's a control char ( < 0x20 )
+            if [ $((16#$hex)) -ge 32 ] && [ $((16#$hex)) -ne 127 ]; then
+                 BUFFER+="$char"
+                 printf "%s" "$char"
+            fi
+        fi
+    done
+done
+
+# Final display
+# We need to print the state one last time to show the final value entered
+# But we don't want to print the prompt for the "next" field (which doesn't exist)
+# So we just print the full config as it would appear on screen
+
+# Actually, the loop terminates when IDX == #FIELDS.
+# So print_state will try to print FIELDS[IDX] which is empty.
+# Let's fix print_state to handle IDX out of bounds gracefully or just not print the prompt.
+
+# Or better, just print the final state without the prompt.
+if [ "$FIRST_RUN" != "true" ]; then
+    # Move up N lines
+    local lines_to_move=0
+    local last_sect=""
+    for ((i=0; i<=PREV_IDX; i++)); do
+        local f=${FIELDS[$i]}
+        local s=${f%%:*}
+        if [ "$s" != "$last_sect" ]; then
+            if [ -n "$last_sect" ]; then ((lines_to_move++)); fi
+            ((lines_to_move++))
+            last_sect=$s
+        fi
+        if [ $i -eq $PREV_IDX ] || [ -n "${VALUES[$f]}" ]; then
+            ((lines_to_move++))
+        fi
+    done
+    
+    if [ $lines_to_move -gt 1 ]; then
+        tput cuu $((lines_to_move - 1))
+    fi
+    tput cr
+    tput ed
+fi
+
+local last_section=""
+for ((i=0; i<${#FIELDS[@]}; i++)); do
+    local field=${FIELDS[$i]}
+    local section=${field%%:*}
+    local key=${field##*:}
+    
+    # Print section header if changed
+    if [ "$section" != "$last_section" ]; then
+        if [ -n "$last_section" ]; then echo ""; fi
+        echo "[$section]"
+        last_section=$section
+    fi
+    
+    local val=${VALUES[$field]}
+    if [ -n "$val" ]; then
+        echo "$key=$val"
+    fi
+done
+
+echo ""
+echo ""
+
+# Write to file
+OUTFILE=".cqfdrc"
+{
+    last_section=""
+    for field in "${FIELDS[@]}"; do
+        section=${field%%:*}
+        key=${field##*:}
+        val=${VALUES[$field]}
+        
+        if [ -n "$val" ]; then
+            if [ "$section" != "$last_section" ]; then
+                if [ -n "$last_section" ]; then echo ""; fi
+                echo "[$section]"
+                last_section=$section
+            fi
+            echo "$key=$val"
+        fi
+    done
+} > "$OUTFILE"
+
+echo "Done. Configuration saved to $OUTFILE"
