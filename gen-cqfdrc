@@ -248,9 +248,9 @@ fi
 
 last_section=""
 for ((i=0; i<${#FIELDS[@]}; i++)); do
-    local field=${FIELDS[$i]}
-    local section=${field%%:*}
-    local key=${field##*:}
+    field=${FIELDS[$i]}
+    section=${field%%:*}
+    key=${field##*:}
     
     # Print section header if changed
     if [ "$section" != "$last_section" ]; then
@@ -259,7 +259,7 @@ for ((i=0; i<${#FIELDS[@]}; i++)); do
         last_section=$section
     fi
     
-    local val=${VALUES[$field]}
+    val=${VALUES[$field]}
     if [ -n "$val" ]; then
         echo "$key=$val"
     fi
