@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # gen-cqfdrc - Interactive generator for .cqfdrc
 
@@ -18,6 +18,7 @@ FIELDS=(
     "build:archive"
     "build:tar_transform"
     "build:tar_options"
+    "next:NEW_SECTION_PROMPT"
 )
 
 # Store values
@@ -26,32 +27,43 @@ declare -A VALUES
 # Current field index
 IDX=0
 
+# Initialize state tracking
+FIRST_RUN="true"
+PREV_IDX=0
+
+# Function to calculate lines to move up
+calculate_lines_to_move() {
+    LINES_TO_MOVE=0
+    local last_sect=""
+    for ((i=0; i<=PREV_IDX; i++)); do
+        local f=${FIELDS[$i]}
+        local s=${f%%:*}
+        local k=${f##*:}
+
+        # Section header logic
+        if [ "$s" != "$last_sect" ]; then
+            if [ -n "$last_sect" ]; then ((LINES_TO_MOVE++)); fi # Empty line
+            if [ "$k" != "NEW_SECTION_PROMPT" ]; then
+                ((LINES_TO_MOVE++)) # Section header
+            fi
+            last_sect=$s
+        fi
+
+        # Field line logic
+        if [ $i -eq $PREV_IDX ] || [ -n "${VALUES[$f]}" ]; then
+            ((LINES_TO_MOVE++))
+        fi
+    done
+}
+
 # Function to clear screen and print current state
 print_state() {
     if [ "$FIRST_RUN" != "true" ]; then
-        # Move up N lines
-        local lines_to_move=0
-        local last_sect=""
-        for ((i=0; i<=PREV_IDX; i++)); do
-            local f=${FIELDS[$i]}
-            local s=${f%%:*}
-
-            # Section header logic
-            if [ "$s" != "$last_sect" ]; then
-                if [ -n "$last_sect" ]; then ((lines_to_move++)); fi # Empty line
-                ((lines_to_move++)) # Section header
-                last_sect=$s
-            fi
-
-            # Field line logic
-            if [ $i -eq $PREV_IDX ] || [ -n "${VALUES[$f]}" ]; then
-                ((lines_to_move++))
-            fi
-        done
+        calculate_lines_to_move
 
         # Move cursor up
-        if [ $lines_to_move -gt 1 ]; then
-            tput cuu $((lines_to_move - 1))
+        if [ $LINES_TO_MOVE -gt 1 ]; then
+            tput cuu $((LINES_TO_MOVE - 1))
         fi
         tput cr
 
@@ -73,27 +85,30 @@ print_state() {
         # Print section header if changed
         if [ "$section" != "$last_section" ]; then
             if [ -n "$last_section" ]; then echo ""; fi
-            echo "[$section]"
+            if [ "$key" != "NEW_SECTION_PROMPT" ]; then
+                echo "[$section]"
+            fi
             last_section=$section
         fi
 
         # If it's the current field being edited
         if [ $i -eq $IDX ]; then
-            printf "%s=" "$key"
+            if [ "$key" == "NEW_SECTION_PROMPT" ]; then
+                printf "["
+            else
+                printf "%s=" "$key"
+            fi
         else
             # Print previously entered value if it exists
             local val=${VALUES[$field]}
             if [ -n "$val" ]; then
-                echo "$key=$val"
+                if [ "$key" != "NEW_SECTION_PROMPT" ]; then
+                    echo "$key=$val"
+                fi
             fi
         fi
     done
 }
-
-
-# Initialize state tracking
-FIRST_RUN="true"
-PREV_IDX=0
 
 # Main loop
 while [ $IDX -lt ${#FIELDS[@]} ]; do
@@ -104,12 +119,68 @@ while [ $IDX -lt ${#FIELDS[@]} ]; do
 
     CURRENT_FIELD=${FIELDS[$IDX]}
 
+    # Check if we are prompting for a new section
+    if [[ "$CURRENT_FIELD" == *":NEW_SECTION_PROMPT" ]]; then
+        BUFFER=""
+        printf "%s" "$BUFFER"
+
+        while true; do
+            IFS= read -rsn1 char
+
+            if [[ -z "$char" ]]; then
+                # Enter
+                if [ -n "$BUFFER" ]; then
+                    # User entered a new section name
+                    NEW_SECTION="$BUFFER"
+
+                    # Add standard build fields for this new section
+                    NEW_FIELDS=(
+                        "$NEW_SECTION:command"
+                        "$NEW_SECTION:distro"
+                        "$NEW_SECTION:user_extra_groups"
+                        "$NEW_SECTION:docker_build_args"
+                        "$NEW_SECTION:docker_run_args"
+                        "$NEW_SECTION:docker_rmi_args"
+                        "$NEW_SECTION:files"
+                        "$NEW_SECTION:archive"
+                        "$NEW_SECTION:tar_transform"
+                        "$NEW_SECTION:tar_options"
+                        "next:NEW_SECTION_PROMPT"
+                    )
+
+                    # Insert into FIELDS array
+                    TEMP_FIELDS=("${FIELDS[@]:0:$IDX}")
+                    TEMP_FIELDS+=("${NEW_FIELDS[@]}")
+                    FIELDS=("${TEMP_FIELDS[@]}")
+
+                    break
+                else
+                    # Empty input -> Stop adding sections
+                    ((IDX++))
+                    break
+                fi
+            elif [[ "$char" == $'\x7f' ]] || [[ "$char" == $'\x08' ]]; then
+                # Backspace
+                if [ ${#BUFFER} -gt 0 ]; then
+                    BUFFER="${BUFFER%?}"
+                    printf "\b \b"
+                fi
+            elif [[ "$char" =~ [a-zA-Z0-9_-] ]]; then
+                 BUFFER+="$char"
+                 printf "%s" "$char"
+            fi
+        done
+
+        continue
+    fi
+
     # Get existing value to edit
     BUFFER="${VALUES[$CURRENT_FIELD]}"
 
     printf "%s" "$BUFFER"
 
     while true; do
+
         IFS= read -rsn1 char
 
         # Handle Enter (empty char)
@@ -118,14 +189,13 @@ while [ $IDX -lt ${#FIELDS[@]} ]; do
             if [ -n "$BUFFER" ]; then
                 VALUES[$CURRENT_FIELD]="$BUFFER"
             else
-                unset VALUES[$CURRENT_FIELD]
+                unset VALUES["$CURRENT_FIELD"]
             fi
             ((IDX++))
             break
         fi
 
         # Handle Control Characters
-        # We use hex representation to be safe
         printf -v hex "%x" "'$char"
 
         if [[ "$hex" == "7f" ]] || [[ "$hex" == "8" ]]; then
@@ -139,7 +209,7 @@ while [ $IDX -lt ${#FIELDS[@]} ]; do
             if [ -n "$BUFFER" ]; then
                 VALUES[$CURRENT_FIELD]="$BUFFER"
             else
-                unset VALUES[$CURRENT_FIELD]
+                unset VALUES["$CURRENT_FIELD"]
             fi
             ((IDX++))
             break
@@ -148,7 +218,7 @@ while [ $IDX -lt ${#FIELDS[@]} ]; do
             if [ -n "$BUFFER" ]; then
                 VALUES[$CURRENT_FIELD]="$BUFFER"
             else
-                unset VALUES[$CURRENT_FIELD]
+                unset VALUES["$CURRENT_FIELD"]
             fi
             ((IDX--))
             break
@@ -157,15 +227,11 @@ while [ $IDX -lt ${#FIELDS[@]} ]; do
             echo ""
             exit 1
         elif [[ "$hex" =~ ^[2-7]. ]]; then
-            # Printable characters (roughly)
-            # This regex is a bit loose, let's just trust it's printable if not control
+            # Printable characters
             BUFFER+="$char"
             printf "%s" "$char"
         else
-            # Other printable chars (digits, etc)
-            # Hex for 'a' is 61.
-            # Let's just accept everything that isn't a control char we handled
-            # Check if it's a control char ( < 0x20 )
+            # Other printable chars
             if [ $((16#$hex)) -ge 32 ] && [ $((16#$hex)) -ne 127 ]; then
                  BUFFER+="$char"
                  printf "%s" "$char"
@@ -181,6 +247,12 @@ OUTFILE=".cqfdrc"
     for field in "${FIELDS[@]}"; do
         section=${field%%:*}
         key=${field##*:}
+
+        # Skip the prompt field
+        if [ "$key" == "NEW_SECTION_PROMPT" ]; then
+            continue
+        fi
+
         val=${VALUES[$field]}
 
         if [ -n "$val" ]; then
@@ -196,24 +268,10 @@ OUTFILE=".cqfdrc"
 
 # Clear previous output and show file content
 if [ "$FIRST_RUN" != "true" ]; then
-    # Move up N lines
-    lines_to_move=0
-    last_sect=""
-    for ((i=0; i<=PREV_IDX; i++)); do
-        f=${FIELDS[$i]}
-        s=${f%%:*}
-        if [ "$s" != "$last_sect" ]; then
-            if [ -n "$last_sect" ]; then ((lines_to_move++)); fi
-            ((lines_to_move++))
-            last_sect=$s
-        fi
-        if [ $i -eq $PREV_IDX ] || [ -n "${VALUES[$f]}" ]; then
-            ((lines_to_move++))
-        fi
-    done
+    calculate_lines_to_move
 
-    if [ $lines_to_move -gt 1 ]; then
-        tput cuu $((lines_to_move - 1))
+    if [ $LINES_TO_MOVE -gt 1 ]; then
+        tput cuu $((LINES_TO_MOVE - 1))
     fi
     tput cr
     tput ed

@@ -20,6 +20,7 @@ doc: cqfd.1.gz cqfdrc.5.gz
 install:
 	install -d $(DESTDIR)$(PREFIX)/bin/
 	install -m 0755 cqfd $(DESTDIR)$(PREFIX)/bin/
+	install -m 0755 gen-cqfdrc $(DESTDIR)$(PREFIX)/bin/
 	install -d $(DESTDIR)$(PREFIX)/share/doc/cqfd/
 	install -m 0644 AUTHORS CHANGELOG.md LICENSE README.md $(DESTDIR)$(PREFIX)/share/doc/cqfd/
 	if [ -e cqfd.1.gz ]; then \
@@ -43,6 +44,7 @@ install:
 
 uninstall:
 	rm -rf $(DESTDIR)$(PREFIX)/bin/cqfd \
+		$(DESTDIR)$(PREFIX)/bin/gen-cqfdrc \
 		$(DESTDIR)$(PREFIX)/share/man/man1/cqfd.1.gz \
 		$(DESTDIR)$(PREFIX)/share/man/man5/cqfdrc.5.gz \
 		$(DESTDIR)$(PREFIX)/share/doc/cqfd \
