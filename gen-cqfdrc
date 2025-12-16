@@ -246,7 +246,7 @@ if [ "$FIRST_RUN" != "true" ]; then
     tput ed
 fi
 
-local last_section=""
+last_section=""
 for ((i=0; i<${#FIELDS[@]}; i++)); do
     local field=${FIELDS[$i]}
     local section=${field%%:*}
