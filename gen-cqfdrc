@@ -28,45 +28,8 @@ IDX=0
 
 # Function to clear screen and print current state
 print_state() {
-    # Move cursor to top left, but don't clear scrollback
-    # We assume the script starts on a clean line.
-    # However, to make it look like the example, we need to redraw from the start position.
-    # Since we can't easily know the start position without clearing,
-    # and the user requested NOT to clear the terminal above it,
-    # we will use tput to save/restore cursor or move up N lines.
-
-    # Calculate how many lines we printed last time to move up
-    # Initial state (IDX=0) prints 1 line (header) + 1 line (section) + 1 line (prompt) = 3 lines
-    # But it grows.
-
-    # Simpler approach: Clear from cursor down, then reprint.
-    # But we need to be at the top of OUR output.
-
-    # Let's try to just clear the screen if it's the first run,
-    # OR assume we are always appending? No, the example shows the list growing.
-    # Actually, the example shows:
-    # $ gen-cqfdrc
-    # [project]
-    # org=
-    #
-    # Then:
-    # $ gen-cqfdrc
-    # [project]
-    # org='cool-organization'
-    # name=
-
-    # This implies the screen IS clearing or we are redrawing everything.
-    # If the user says "don't clear the terminal above it", they mean don't use `clear` which wipes the whole buffer.
-    # They probably want to overwrite the previous output of THIS script.
-
     if [ "$FIRST_RUN" != "true" ]; then
         # Move up N lines
-        # We need to track how many lines we printed.
-        # Header: 0 lines (removed per request)
-        # For each field up to IDX:
-        #   New section? +2 lines (empty line + section header), except first section just +1
-        #   Field line: +1
-
         local lines_to_move=0
         local last_sect=""
         for ((i=0; i<=PREV_IDX; i++)); do
@@ -81,8 +44,6 @@ print_state() {
             fi
 
             # Field line logic
-            # We count the line if it was printed.
-            # It is printed if it has a value OR if it was the one being edited (PREV_IDX)
             if [ $i -eq $PREV_IDX ] || [ -n "${VALUES[$f]}" ]; then
                 ((lines_to_move++))
             fi
@@ -128,6 +89,7 @@ print_state() {
         fi
     done
 }
+
 
 # Initialize state tracking
 FIRST_RUN="true"
