@@ -212,16 +212,27 @@ while [ $IDX -lt ${#FIELDS[@]} ]; do
     done
 done
 
-# Final display
-# We need to print the state one last time to show the final value entered
-# But we don't want to print the prompt for the "next" field (which doesn't exist)
-# So we just print the full config as it would appear on screen
+# Write to file
+OUTFILE=".cqfdrc"
+{
+    last_section=""
+    for field in "${FIELDS[@]}"; do
+        section=${field%%:*}
+        key=${field##*:}
+        val=${VALUES[$field]}
 
-# Actually, the loop terminates when IDX == #FIELDS.
-# So print_state will try to print FIELDS[IDX] which is empty.
-# Let's fix print_state to handle IDX out of bounds gracefully or just not print the prompt.
+        if [ -n "$val" ]; then
+            if [ "$section" != "$last_section" ]; then
+                if [ -n "$last_section" ]; then echo ""; fi
+                echo "[$section]"
+                last_section=$section
+            fi
+            echo "$key=$val"
+        fi
+    done
+} > "$OUTFILE"
 
-# Or better, just print the final state without the prompt.
+# Clear previous output and show file content
 if [ "$FIRST_RUN" != "true" ]; then
     # Move up N lines
     lines_to_move=0
@@ -246,44 +257,4 @@ if [ "$FIRST_RUN" != "true" ]; then
     tput ed
 fi
 
-last_section=""
-for ((i=0; i<${#FIELDS[@]}; i++)); do
-    field=${FIELDS[$i]}
-    section=${field%%:*}
-    key=${field##*:}
-
-    # Print section header if changed
-    if [ "$section" != "$last_section" ]; then
-        if [ -n "$last_section" ]; then echo ""; fi
-        echo "[$section]"
-        last_section=$section
-    fi
-
-    val=${VALUES[$field]}
-    if [ -n "$val" ]; then
-        echo "$key=$val"
-    fi
-done
-
-echo ""
-echo ""
-
-# Write to file
-OUTFILE=".cqfdrc"
-{
-    last_section=""
-    for field in "${FIELDS[@]}"; do
-        section=${field%%:*}
-        key=${field##*:}
-        val=${VALUES[$field]}
-
-        if [ -n "$val" ]; then
-            if [ "$section" != "$last_section" ]; then
-                if [ -n "$last_section" ]; then echo ""; fi
-                echo "[$section]"
-                last_section=$section
-            fi
-            echo "$key=$val"
-        fi
-    done
-} > "$OUTFILE"
+cat "$OUTFILE"
